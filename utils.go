@@ -4,7 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"errors"
-	"fmt"
 	"html/template"
 	"io/ioutil"
 	"os"
@@ -16,54 +15,47 @@ import (
 )
 
 //go:embed assets/navbar.tmpl
-var navbar []byte
+var navbarTemplate []byte
 
-// errors
-var errPageExists = errors.New("page exists")
+// Errors
+var ErrPageAlreadyExists = errors.New("page already exists")
 
 func init() {
-	// Überprüfen, ob die eingebettete Datei korrekt geladen wurde
-	if len(navbar) == 0 {
-		panic("Fehler: Die Datei 'assets/navbar.tmpl' konnte nicht geladen werden. Stellen Sie sicher, dass der Pfad relativ zur go.mod-Datei korrekt ist.")
+	// Ensure the embedded file is loaded correctly
+	if len(navbarTemplate) == 0 {
+		panic("Error: The file 'assets/navbar.tmpl' could not be loaded. Ensure the path is correct relative to the go.mod file.")
 	}
 
-	// Debug-Ausgabe des Inhalts der eingebetteten Datei
-	fmt.Println("Inhalt von navbar.tmpl:")
-	fmt.Println(string(navbar))
 }
 
-type article struct {
-	path  string
+type Article struct {
+	Path  string
 	Name  string
-	Pages []page
+	Pages []Page
 }
 
-type page struct {
-	Name        string
-	input_path  string
-	output_path string
+type Page struct {
+	Name       string
+	InputPath  string
+	OutputPath string
 }
 
-// input_dir: path to input directory, where markdowns are
-// output_dir: path to output dir where tmpl should be placed
-func New(input_dir string, output_dir string) ([]article, error) {
-	files, err := ioutil.ReadDir(input_dir)
+// NewArticles initializes articles from the input directory and renders them to the output directory.
+func NewArticles(inputDir string, outputDir string) ([]Article, error) {
+	files, err := ioutil.ReadDir(inputDir)
 	if err != nil {
 		return nil, err
 	}
 
-	var articles []article
+	var articles []Article
 
 	for _, file := range files {
 		if !file.IsDir() {
 			continue
 		}
 
-		// get all the pages of an article
-
-		var pages []page
-
-		pageFiles, err := ioutil.ReadDir(input_dir + "/" + file.Name())
+		var pages []Page
+		pageFiles, err := ioutil.ReadDir(inputDir + "/" + file.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -72,30 +64,36 @@ func New(input_dir string, output_dir string) ([]article, error) {
 			if !strings.HasSuffix(pageFile.Name(), ".md") {
 				continue
 			}
-			pages = append(pages, page{Name: strings.TrimSuffix(pageFile.Name(), ".md"), input_path: input_dir + "/" + file.Name(), output_path: output_dir + "/" + file.Name()})
+			pages = append(pages, Page{
+				Name:       strings.TrimSuffix(pageFile.Name(), ".md"),
+				InputPath:  inputDir + "/" + file.Name(),
+				OutputPath: outputDir + "/" + file.Name(),
+			})
 		}
-		current_article := article{Name: file.Name(), Pages: pages, path: input_dir + "/" + file.Name()}
-		err = current_article.Render(output_dir)
+
+		currentArticle := Article{
+			Name:  file.Name(),
+			Pages: pages,
+			Path:  inputDir + "/" + file.Name(),
+		}
+
+		err = currentArticle.Render(outputDir)
 		if err != nil {
 			return nil, err
 		}
-		articles = append(articles, current_article)
-
+		articles = append(articles, currentArticle)
 	}
 
 	return articles, nil
 }
 
-// read markdown in article, render to html and put in output dir
-func (article *article) Render(output string) error {
-	// check if directory exists
-
+// Render processes the markdown files in an article and generates HTML output.
+func (article *Article) Render(output string) error {
 	err := os.Mkdir(output+"/"+article.Name, 0755)
 	if err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
 
-	// create sidebar
 	sidebar, err := article.genSidebar()
 	if err != nil {
 		return err
@@ -103,7 +101,7 @@ func (article *article) Render(output string) error {
 
 	for _, page := range article.Pages {
 		err = page.Render(sidebar)
-		if err != nil && !errors.Is(err, errPageExists) {
+		if err != nil && !errors.Is(err, ErrPageAlreadyExists) {
 			return err
 		}
 	}
@@ -111,8 +109,8 @@ func (article *article) Render(output string) error {
 	return nil
 }
 
-func (article *article) genSidebar() (*bytes.Buffer, error) {
-	ts, err := template.New("sidebar").Parse(string(navbar))
+func (article *Article) genSidebar() (*bytes.Buffer, error) {
+	ts, err := template.New("sidebar").Parse(string(navbarTemplate))
 	if err != nil {
 		return nil, err
 	}
@@ -124,29 +122,29 @@ func (article *article) genSidebar() (*bytes.Buffer, error) {
 	return buf, nil
 }
 
-func (page *page) Render(sidebar *bytes.Buffer) error {
-	// check if page output file already exists
-	if _, err := os.Stat(page.output_path + "/" + page.Name + ".layout.tmpl"); !errors.Is(err, os.ErrNotExist) {
-		// file already exist
-		return errPageExists
+func (page *Page) Render(sidebar *bytes.Buffer) error {
+	outputFile := page.OutputPath + "/" + page.Name + ".layout.tmpl"
+	if _, err := os.Stat(outputFile); err == nil {
+		return ErrPageAlreadyExists
 	}
-	// read file
-	dat, err := os.ReadFile(page.input_path + "/" + page.Name + ".md")
+
+	markdownData, err := os.ReadFile(page.InputPath + "/" + page.Name + ".md")
 	if err != nil {
 		return err
 	}
+
 	prefix := []byte("{{template \"article-base\" .}}\n{{define \"main\"}}\n")
-	html := mdToHTML(dat)
+	html := mdToHTML_(markdownData)
 	suffix := []byte(`{{end}}{{define "sidebar"}}`)
-	sufsuffix := []byte(`{{end}}`)
-	data := append(append(append(append(prefix, html...), suffix...), sidebar.Bytes()...), sufsuffix...)
-	// write file
-	err = os.WriteFile(page.output_path+"/"+page.Name+".layout.tmpl", data, 0644)
+	sidebarSuffix := []byte(`{{end}}`)
+
+	data := append(append(append(append(prefix, html...), suffix...), sidebar.Bytes()...), sidebarSuffix...)
+	err = os.WriteFile(outputFile, data, 0644)
 
 	return err
 }
 
-func mdToHTML(md []byte) []byte {
+func mdToHTML_(md []byte) []byte {
 	// create markdown parser with extensions
 	extensions := parser.CommonExtensions | parser.AutoHeadingIDs | parser.NoEmptyLineBeforeBlock
 	p := parser.NewWithExtensions(extensions)

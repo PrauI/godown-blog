@@ -12,4 +12,6 @@ go get github.com/PrauI/godown-blog
 ### Todo
 - [x] check for already generated files
 - [ ] integration in a templtes cache
-- [ ] 
+
+## dependencies
+[github.com/gomarkdown/markdown](github.com/gomarkdown/markdown)
