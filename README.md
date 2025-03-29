@@ -10,6 +10,6 @@ go get github.com/PrauI/godown-blog
 ## Use
 
 ### Todo
-- [ ] check for already generated files
+- [x] check for already generated files
 - [ ] integration in a templtes cache
 - [ ] 
